@@ -1,0 +1,5 @@
+{
+  "generator": "scripts/build-pages.mjs",
+  "basePath": "/vladivostok-winter-two-2026",
+  "apiOrigin": "https://vladivostok-winter-two-2026.vercel.app"
+}
