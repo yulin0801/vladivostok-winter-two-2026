@@ -33,3 +33,18 @@ export function hotelTotal(record: Pick<RecordItem, 'data'>): number | undefined
   const { price, nights } = record.data;
   return hasNumber(price) && hasNumber(nights) ? Number(price) * Number(nights) : undefined;
 }
+
+/** Reapply only edits made since the editor opened onto the latest record. */
+export function rebaseDraft(
+  baseline: Record<string, unknown>,
+  draft: Record<string, unknown>,
+  latest: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = { ...latest };
+  for (const key of new Set([...Object.keys(baseline), ...Object.keys(draft)])) {
+    if (JSON.stringify(baseline[key]) === JSON.stringify(draft[key])) continue;
+    if (Object.prototype.hasOwnProperty.call(draft, key)) result[key] = draft[key];
+    else delete result[key];
+  }
+  return result;
+}

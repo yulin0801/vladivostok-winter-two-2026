@@ -7,11 +7,11 @@ import TripMap from './components/TripMap';
 import type { PlacePoint, RecordItem, RecordType } from './lib/types';
 import { apiFetch, getShareUrl, publicAssetUrl } from './lib/client-access';
 import { AuthImage } from './components/AccessGate';
-import { hasDraftContent, hasLocation, hasNumber, hotelTotal, recordTitle } from './components/record-draft';
+import { hasDraftContent, hasLocation, hasNumber, hotelTotal, rebaseDraft, recordTitle } from './components/record-draft';
 
 type Tab = 'map' | 'days' | 'notes' | 'packing' | 'food' | 'hotels' | 'gifts';
 type SearchPlace = PlacePoint & { subtitle?: string };
-type Editor = { type: RecordType; record?: RecordItem; data: any };
+type Editor = { type: RecordType; record?: RecordItem; data: any; baseline: Record<string, unknown> };
 type RoadRoute = { geometry: { type: 'LineString'; coordinates: number[][] }; distance: number; duration: number; order: string[]; signature: string; mode: 'walking' | 'driving' };
 const DAYS = ['2026-12-05', '2026-12-06', '2026-12-07', '2026-12-08', '2026-12-09'];
 const WEEKDAYS = ['周六', '周日', '周一', '周二', '周三'];
@@ -51,7 +51,7 @@ function defaults(type: RecordType, overrides: any = {}) {
   const data: Record<string, any> = {
     place: { name: '', ruName: '', lat: '', lng: '', category: '景点', day: '', order: Date.now(), time: '', duration: '', note: '', visited: false },
     note: { text: '', category: '出发前', done: false },
-    packing: { text: '', owner: PEOPLE[0], category: '其他', done: false },
+    packing: { text: '', owner: '', category: '其他', done: false },
     restaurant: { name: '', ruName: '', address: '', lat: '', lng: '', cuisine: '', price: '', currency: 'RUB', note: '', url: '', visited: false },
     hotel: { name: '', address: '', lat: '', lng: '', price: '', currency: 'RUB', nights: '', images: [], url: '', note: '', status: '备选' },
     gift: { name: '', quantity: '', price: '', currency: 'RUB', buyer: '一起', note: '', done: false },
@@ -152,6 +152,7 @@ export default function TripApp() {
   const hotels = useMemo(() => records.filter(r => r.type === 'hotel'), [records]);
   const notes = useMemo(() => records.filter(r => r.type === 'note'), [records]);
   const packing = useMemo(() => records.filter(r => r.type === 'packing'), [records]);
+  const unassignedPacking = packing.filter(r => !PEOPLE.includes(r.data.owner));
   const gifts = useMemo(() => records.filter(r => r.type === 'gift'), [records]);
   const dayPlaces = useMemo(() => places.filter(r => r.data.day === day).sort((a, b) => Number(a.data.order || 0) - Number(b.data.order || 0) || a.id.localeCompare(b.id)), [places, day]);
   const locatedDayPlaces = dayPlaces.filter(hasLocation);
@@ -174,7 +175,7 @@ export default function TripApp() {
   const update = (record: RecordItem, data: any) => mutate(() => request(`/api/records/${encodeURIComponent(record.id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data, version: record.version }) }));
   const act = async (fn: () => Promise<any>, message?: string) => { try { await fn(); if (message) setToast(message); } catch (e: any) { setToast(e.message); } };
   const closeEditor = useCallback(() => { if (!mutationBusy.current && !uploadBusy.current) { setEditor(null); setFormError(''); } }, []);
-  const openEditor = (type: RecordType, record?: RecordItem, data?: any) => { touchedFields.current = new Set(); setEditor({ type, record, data: defaults(type, record?.data || data || {}) }); setFormError(''); setLocationQuery(''); setLocationResults(null); };
+  const openEditor = (type: RecordType, record?: RecordItem, data?: any) => { touchedFields.current = new Set(); const initial = defaults(type, record?.data || data || {}); setEditor({ type, record, data: initial, baseline: structuredClone(initial) }); setFormError(''); setLocationQuery(''); setLocationResults(null); };
   const setData = (key: string, value: any) => { touchedFields.current.add(key); setEditor(e => e ? { ...e, data: { ...e.data, [key]: value } } : e); };
 
   async function saveEditor(event: FormEvent) {
@@ -195,7 +196,11 @@ export default function TripApp() {
       // Keep the draft; use the latest revision only after the user reviews it and saves again.
       if (e.status === 409 && editor.record) {
         const latest = await load(true); const fresh = latest?.find(r => r.id === editor.record!.id);
-        if (fresh) setEditor(current => { if (!current) return current; const changed = Object.fromEntries(Object.entries(current.data).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(current.record?.data[k]))); return { ...current, record: fresh, data: { ...fresh.data, ...changed } }; });
+        if (fresh) setEditor(current => {
+          if (!current) return current;
+          const latestBaseline = defaults(current.type, fresh.data);
+          return { ...current, record: fresh, data: rebaseDraft(current.baseline, current.data, latestBaseline), baseline: structuredClone(latestBaseline) };
+        });
       }
     } finally { setSaving(false); }
   }
@@ -219,7 +224,7 @@ export default function TripApp() {
     openEditor('place', undefined, { name: place.name, lat: place.lat, lng: place.lng, note: place.subtitle || '' });
   }
   function addToDay(record: RecordItem, targetDay = day) {
-    if (record.type === 'place') { openEditor('place', record); setEditor({ type: 'place', record, data: { ...record.data, day: targetDay, order: Date.now() } }); }
+    if (record.type === 'place') { openEditor('place', record); setEditor(current => current ? { ...current, data: { ...current.data, day: targetDay, order: Date.now() } } : current); }
     else openEditor('place', undefined, { name: record.data.name, ruName: record.data.ruName || '', lat: record.data.lat ?? '', lng: record.data.lng ?? '', category: record.type === 'hotel' ? '酒店' : '美食', day: targetDay, note: record.data.note || '' });
   }
   async function copyAddress(record: RecordItem) {
@@ -317,6 +322,7 @@ export default function TripApp() {
         {tab === 'packing' && <>
           {pageHeader('TWO SUITCASES, ONE ADVENTURE', '你带什么，我都看得见。', '各自整理，也能互相照应。共用物品写清楚由谁携带，避免重复。')}
           <div className="packing-board">{PEOPLE.map((person, index) => { const list = packing.filter(r => r.data.owner === person), done = list.filter(r => r.data.done).length; return <section className={`packing-column person-${index}`} key={person}><div className="person-heading"><div className="person-avatar"><img src={PROFILES[person].photo} alt={`${PROFILES[person].nickname}（${person}）的头像`} /></div><div><span className="eyebrow">SUITCASE {String(index + 1).padStart(2, '0')}</span><h2>{PROFILES[person].nickname}<small className="person-real-name">{person}</small></h2><p>{done} / {list.length} 件已装好</p></div><Suitcase size={37} strokeWidth={1.2} className="suitcase-drawing" /></div><div className="progress-track"><span style={{ width: `${list.length ? done / list.length * 100 : 0}%` }} /></div><form className="packing-quick edit-only" onSubmit={e => { e.preventDefault(); void quickAdd('packing', person, { owner: person }); }}><input aria-label={`添加${person}的行李`} placeholder="还需要带什么？" value={quickText[person] || ''} onChange={e => setQuickText(q => ({ ...q, [person]: e.target.value }))} /><button className="icon-button" type="submit" aria-label={`添加到${person}的行李`}><Plus size={19} /></button></form><div className="packing-items">{list.map(r => <div className={`packing-item ${r.data.done ? 'done' : ''}`} key={r.id}><button className="check-control" aria-label={`${r.data.done ? '未装好' : '已装好'}：${recordTitle(r)}`} onClick={() => void act(() => update(r, { ...r.data, done: !r.data.done }))}>{r.data.done ? <CheckCircle2 size={21} /> : <Circle size={21} />}</button><button className="packing-item-name" onClick={() => openEditor('packing', r)}><strong>{recordTitle(r)}</strong><small>{r.data.category || '其他'}</small></button><button className="icon-button delete-packing" aria-label={`删除${recordTitle(r)}`} onClick={() => setDeleteTarget(r)}><X size={14} /></button></div>)}{!list.length && <p className="packing-empty">空空的箱子，等待出发。</p>}</div><button className="add-dashed edit-only" onClick={() => openEditor('packing', undefined, { owner: person })}><Plus size={15} />添加行李</button></section>; })}</div>
+          {unassignedPacking.length > 0 && <section className="checklist-card" style={{marginTop:20,padding:'20px 24px'}} aria-labelledby="unassigned-packing-title"><div className="section-top"><div><h3 id="unassigned-packing-title">尚未分配的行李</h3><p>先记下来，稍后选择谁来带。</p></div><span className="count-pill">{unassignedPacking.length} 件</span></div>{unassignedPacking.map(r => <div key={r.id} className={`check-row ${r.data.done ? 'done' : ''}`}><button className="check-control" aria-label={`${r.data.done ? '取消完成' : '标记完成'}：${recordTitle(r)}`} onClick={() => void act(() => update(r, { ...r.data, done: !r.data.done }))}>{r.data.done ? <CheckCircle2 size={23} /> : <Circle size={23} />}</button><div className="check-content"><strong>{recordTitle(r)}</strong><span className="mini-tag">{r.data.category || '其他'}</span></div><button className="text-button" onClick={() => openEditor('packing', r)}>选择归属</button><button className="icon-button danger-hover" aria-label={`删除${recordTitle(r)}`} onClick={() => setDeleteTarget(r)}><Trash2 size={15} /></button></div>)}</section>}
           <div className="gentle-note"><Snowflake size={18} /><span>冬日行李小提醒：保暖层、防风外套、帽子手套、防滑鞋，以及充电与常用护理用品。</span></div>
         </>}
 
@@ -346,7 +352,7 @@ export default function TripApp() {
         {['place', 'restaurant', 'hotel', 'gift'].includes(editor.type) && <Field label="名称（选填）" wide><input maxLength={200} value={editor.data.name || ''} onChange={e => setData('name', e.target.value)} placeholder={editor.type === 'hotel' ? '酒店名称' : '给这份期待起个名字'} /></Field>}
         {['note', 'packing'].includes(editor.type) && <Field label="内容（选填）" wide><input maxLength={500} value={editor.data.text || ''} onChange={e => setData('text', e.target.value)} placeholder={editor.type === 'packing' ? '例如：防风手套' : '例如：购买流量卡'} /></Field>}
         {['note', 'packing', 'place'].includes(editor.type) && <Field label="分类"><select value={editor.data.category || ''} onChange={e => setData('category', e.target.value)}>{(editor.type === 'place' ? ['景点', '美食', '酒店', '交通'] : editor.type === 'note' ? ['出发前', '证件', '通信', '交通', '预订', '住宿', '行程', '其他'] : ['证件', '衣物', '洗护', '电子', '药品', '日用', '共用', '其他']).map(v => <option key={v}>{v}</option>)}</select></Field>}
-        {editor.type === 'packing' && <Field label="放进谁的行李箱"><select value={editor.data.owner} onChange={e => setData('owner', e.target.value)}>{PEOPLE.map(p => <option key={p} value={p}>{PROFILES[p].nickname} · {p}</option>)}</select></Field>}
+        {editor.type === 'packing' && <Field label="放进谁的行李箱"><select value={editor.data.owner || ''} onChange={e => setData('owner', e.target.value)}><option value="">暂不分配</option>{PEOPLE.map(p => <option key={p} value={p}>{PROFILES[p].nickname} · {p}</option>)}</select></Field>}
         {['place', 'restaurant'].includes(editor.type) && <Field label="俄文名称"><input maxLength={200} value={editor.data.ruName || ''} onChange={e => setData('ruName', e.target.value)} placeholder="方便地图搜索与问路" /></Field>}
         {editor.type === 'place' && <><Field label="安排在哪一天"><select value={editor.data.day || ''} onChange={e => setData('day', e.target.value)}><option value="">先收藏，还没决定</option>{DAYS.map((d, i) => <option key={d} value={d}>12.{i + 5} · {WEEKDAYS[i]}</option>)}</select></Field><Field label="计划到达时间"><input type="time" value={editor.data.time || ''} onChange={e => setData('time', e.target.value)} /></Field><Field label="预计停留（分钟）"><input type="number" min={5} max={1440} step={5} value={editor.data.duration ?? ''} onChange={e => setData('duration', e.target.value)} /></Field></>}
         {editor.type === 'restaurant' && <Field label="想吃什么 / 菜系"><input maxLength={200} value={editor.data.cuisine || ''} onChange={e => setData('cuisine', e.target.value)} placeholder="例如：海鲜、俄餐、咖啡" /></Field>}
