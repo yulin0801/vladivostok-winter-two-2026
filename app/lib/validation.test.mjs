@@ -33,6 +33,18 @@ accept('note', { category: '交通' }, 'Explicit category-only note');
 accept('settings', { outbound: '13:00–18:05' }, 'Only outbound flight filled');
 accept('hotel', { note: '先收集', price: '', nights: null, url: '   ' }, 'Other optional fields blank');
 
+const photo = '/api/files/8bfe4c50-8254-4cc1-a1db-123456789abc';
+for (const type of ['restaurant', 'hotel', 'gift']) {
+  accept(type, { images: [photo] }, `${type}: photos without any text or price`);
+  accept(type, { images: Array(8).fill(photo) }, `${type}: eight photos allowed`);
+  accept(type, { photos: Array(8).fill(photo) }, `${type}: legacy photos field follows the same limit`);
+  reject(type, { images: Array(9).fill(photo) }, `${type}: ninth photo rejected`);
+  reject(type, { photos: Array(9).fill(photo) }, `${type}: legacy photos field cannot bypass limit`);
+  reject(type, { images: Array(8).fill(photo), photos: [photo] }, `${type}: combined photo count is bounded`);
+  reject(type, { images: ['javascript:alert(1)'] }, `${type}: unsafe image-only content rejected`);
+  reject(type, { images: [{}] }, `${type}: image list contains only URLs`);
+}
+
 reject('hotel', { price: -1 }, 'Negative price');
 reject('hotel', { price: '4200' }, 'Numeric string is not silently coerced');
 reject('hotel', { price: NaN }, 'NaN price');

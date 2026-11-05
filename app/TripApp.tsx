@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FormEvent, ReactNode } from 'react';
-import { ArrowDown, ArrowRight, ArrowUp, Bookmark, CalendarDays, Check, CheckCircle2, ChevronRight, Circle, Cloud, CloudOff, Compass, Copy, Download, ExternalLink, Gift, Heart, Hotel, ListChecks, Loader2, MapPin, Map as MapIcon, MoreHorizontal, Navigation, NotebookPen, Pencil, Plane, Plus, Search, ShoppingBag, Snowflake, Sparkles, Luggage as Suitcase, Trash2, Upload, Users, Utensils, Waves, X } from 'lucide-react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import type { FormEvent, MouseEvent, ReactNode } from 'react';
+import { ArrowDown, ArrowRight, ArrowUp, Bookmark, CalendarDays, Check, CheckCircle2, ChevronRight, Circle, Cloud, CloudOff, Compass, Copy, Download, ExternalLink, Gift, Heart, Hotel, ListChecks, Loader2, MapPin, Map as MapIcon, MoreHorizontal, Navigation, NotebookPen, Pencil, Plane, Plus, Search, ShoppingBag, Snowflake, Sparkles, Luggage as Suitcase, Trash2, Users, Utensils, Waves, X } from 'lucide-react';
 import TripMap from './components/TripMap';
 import type { PlacePoint, RecordItem, RecordType } from './lib/types';
 import { apiFetch, getShareUrl, publicAssetUrl } from './lib/client-access';
-import { AuthImage } from './components/AccessGate';
 import { hasDraftContent, hasLocation, hasNumber, hotelTotal, rebaseDraft, recordTitle } from './components/record-draft';
+import { CollectionImageEditor, CollectionPhoto, collectionImages } from './components/CollectionPhotos';
+import CollectionDetails from './components/CollectionDetails';
 
 type Tab = 'map' | 'days' | 'notes' | 'packing' | 'food' | 'hotels' | 'gifts';
 type SearchPlace = PlacePoint & { subtitle?: string };
@@ -52,23 +53,26 @@ function defaults(type: RecordType, overrides: any = {}) {
     place: { name: '', ruName: '', lat: '', lng: '', category: '景点', day: '', order: Date.now(), time: '', duration: '', note: '', visited: false },
     note: { text: '', category: '出发前', done: false },
     packing: { text: '', owner: '', category: '其他', done: false },
-    restaurant: { name: '', ruName: '', address: '', lat: '', lng: '', cuisine: '', price: '', currency: 'RUB', note: '', url: '', visited: false },
+    restaurant: { name: '', ruName: '', address: '', lat: '', lng: '', cuisine: '', price: '', currency: 'RUB', images: [], note: '', url: '', visited: false },
     hotel: { name: '', address: '', lat: '', lng: '', price: '', currency: 'RUB', nights: '', images: [], url: '', note: '', status: '备选' },
-    gift: { name: '', quantity: '', price: '', currency: 'RUB', buyer: '一起', note: '', done: false },
+    gift: { name: '', quantity: '', price: '', currency: 'RUB', buyer: '一起', images: [], url: '', note: '', done: false },
     settings: { startDate: DAYS[0], endDate: DAYS[4], outbound: '', inbound: '' },
   };
   return { ...data[type], ...overrides };
 }
 
-function Modal({ title, subtitle, children, onClose }: { title: string; subtitle?: string; children: ReactNode; onClose: () => void }) {
+function Modal({ title, subtitle, children, onClose, className = '' }: { title: string; subtitle?: string; children: ReactNode; onClose: () => void; className?: string }) {
   const dialog = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  const titleId = useId();
+  useEffect(() => { close.current = onClose; }, [onClose]);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     const oldOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     dialog.current?.focus();
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') close.current();
       if (e.key === 'Tab') {
         const elements = dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]');
         if (!elements?.length) return;
@@ -78,9 +82,9 @@ function Modal({ title, subtitle, children, onClose }: { title: string; subtitle
       }
     };
     document.addEventListener('keydown', handler);
-    return () => { document.body.style.overflow = oldOverflow; document.removeEventListener('keydown', handler); previous?.focus(); };
-  }, [onClose]);
-  return <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}><div className="modal" ref={dialog} role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabIndex={-1}><header className="modal-header"><div><span className="eyebrow">OUR TRAVEL JOURNAL</span><h2 id="dialog-title">{title}</h2>{subtitle && <p>{subtitle}</p>}</div><button className="icon-button" aria-label="关闭" onClick={onClose}><X size={21} /></button></header>{children}</div></div>;
+    return () => { document.body.style.overflow = oldOverflow; document.removeEventListener('keydown', handler); if (previous?.isConnected) previous.focus(); };
+  }, []);
+  return <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}><div className={`modal ${className}`} ref={dialog} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}><header className="modal-header"><div><span className="eyebrow">OUR TRAVEL JOURNAL</span><h2 id={titleId}>{title}</h2>{subtitle && <p>{subtitle}</p>}</div><button className="icon-button" aria-label="关闭" onClick={onClose}><X size={21} /></button></header>{children}</div></div>;
 }
 
 function Field({ label, children, wide = false }: { label: string; children: ReactNode; wide?: boolean }) { return <label className={`field ${wide ? 'field-wide' : ''}`}><span>{label}</span>{children}</label>; }
@@ -93,6 +97,7 @@ export default function TripApp() {
   const [loadError, setLoadError] = useState('');
   const [toast, setToast] = useState('');
   const [editor, setEditor] = useState<Editor | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<RecordItem | null>(null);
@@ -164,6 +169,7 @@ export default function TripApp() {
   const selectedRecord = records.find(r => r.id === selectedId);
   const activeNav = NAV.find(n => n.id === tab)!;
   const settings = records.find(r => r.type === 'settings');
+  const detailRecord = detailId ? records.find(r => r.id === detailId) : undefined;
 
   const mutate = async (operation: () => Promise<any>) => {
     mutationBusy.current = true; setSync('saving');
@@ -262,14 +268,25 @@ export default function TripApp() {
     } catch (e: any) { setRouteError(e.message); }
     finally { setRouting(false); }
   }
-  async function upload(file?: File) {
-    if (!file) return;
+  async function upload(files: File[]) {
+    if (!editor || !files.length || uploadBusy.current || saving) return;
+    const remaining = Math.max(0, 8 - collectionImages(editor.data).length);
+    if (!remaining) { setFormError('每条记录最多可以放 8 张照片。'); return; }
+    const selected = files.slice(0, remaining);
     uploadBusy.current = true; setUploading(true); setFormError('');
     try {
-      if (file.size > 4 * 1024 * 1024) throw new Error('请选择不超过 4 MB 的图片。');
-      const body = new FormData(); body.append('file', file);
-      const data = await request('/api/upload', { method: 'POST', body });
-      setEditor(e => e ? { ...e, data: { ...e.data, images: [...(e.data.images || []), data.url] } } : e);
+      const results = await Promise.allSettled(selected.map(async file => {
+        if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) throw new Error(`${file.name}：请选择 JPG、PNG、WebP 或 GIF。`);
+        if (file.size > 4 * 1024 * 1024) throw new Error(`${file.name}：图片不能超过 4 MB。`);
+        const body = new FormData(); body.append('file', file);
+        const data = await request('/api/upload', { method: 'POST', body });
+        return data.url as string;
+      }));
+      const urls = results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
+      const errors = results.flatMap(result => result.status === 'rejected' ? [String(result.reason?.message || '图片上传失败，请重试。')] : []);
+      if (urls.length) { touchedFields.current.add('images'); setEditor(e => e ? { ...e, data: { ...e.data, images: [...collectionImages(e.data), ...urls].slice(0, 8) } } : e); }
+      if (files.length > remaining) errors.push(`最多 8 张照片，本次只处理了前 ${remaining} 张。`);
+      if (errors.length) setFormError(`${urls.length ? `已添加 ${urls.length} 张照片。` : ''}${errors.join(' ')}`);
     } catch (e: any) { setFormError(e.message); }
     finally { uploadBusy.current = false; setUploading(false); }
   }
@@ -280,6 +297,11 @@ export default function TripApp() {
   const editActions = (record: RecordItem) => <div className="card-actions"><button className="icon-button" aria-label={`编辑${recordTitle(record)}`} onClick={() => openEditor(record.type, record)}><Pencil size={15} /></button><button className="icon-button danger-hover" aria-label={`删除${recordTitle(record)}`} onClick={() => setDeleteTarget(record)}><Trash2 size={15} /></button></div>;
   const pageHeader = (eyebrow: string, title: string, text: string, action?: ReactNode) => <div className="page-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{text}</p></div>{action}</div>;
   const addButton = (type: RecordType, text: string) => <button className="button primary" onClick={() => openEditor(type)}><Plus size={17} />{text}</button>;
+  const openCardDetail = (event: MouseEvent<HTMLElement>, record: RecordItem) => {
+    if ((event.target as Element).closest('button, a, input, select, textarea, label')) return;
+    event.currentTarget.querySelector<HTMLButtonElement>('.collection-title-button')?.focus();
+    setDetailId(record.id);
+  };
 
   return <div className="travel-app can-edit">
     <aside className="sidebar">
@@ -327,26 +349,41 @@ export default function TripApp() {
         </>}
 
         {tab === 'food' && <>
-          {pageHeader('A TASTE OF VLADIVOSTOK', '下一顿，想吃点什么？', '收藏餐厅、记录人均，也给偶然发现的小店留一个位置。', addButton('restaurant', '收藏餐厅'))}
-          <div className="collection-summary"><span><Utensils size={16} />{restaurants.length} 家想吃</span><span><CheckCircle2 size={16} />{restaurants.filter(r => r.data.visited).length} 家已打卡</span><span>地址可以一键复制给司机</span></div>
-          {!restaurants.length ? <div className="empty-card"><Empty icon={Utensils} title="让第一家餐厅成为期待" text="粘贴收藏链接，记下位置和人均。添加位置后，它也会出现在主页地图。" action={addButton('restaurant', '记下一家想吃的店')} /></div> : <div className="food-grid">{restaurants.map((r, i) => <article className="food-card" key={r.id}><div className={`food-cover cover-${i % 3}`}><Utensils size={43} strokeWidth={1} /><span>{r.data.cuisine || '一顿值得期待的饭'}</span><button className={r.data.visited ? 'visited-button active' : 'visited-button'} onClick={() => void act(() => update(r, { ...r.data, visited: !r.data.visited }))}><Check size={13} />{r.data.visited ? '已打卡' : '想去吃'}</button></div><div className="food-body"><div className="card-title-row"><h2>{recordTitle(r)}</h2>{editActions(r)}</div>{r.data.ruName && <p className="russian-name">{r.data.ruName}</p>}<div className="food-meta"><span><MapPin size={14} />{r.data.address || '地址待补充'}</span><strong>{money(r.data.price, r.data.currency)}<small> / 人</small></strong></div>{r.data.note && <p className="card-note">{r.data.note}</p>}<div className="card-bottom"><button className="text-button" onClick={() => addToDay(r)}><CalendarDays size={14} />加入行程</button><div><button className="icon-button" aria-label="复制餐厅地址" onClick={() => void copyAddress(r)}><Copy size={15} /></button><a className="icon-button" href={safeUrl(r.data.url) || yandex(r)} target="_blank" rel="noreferrer" aria-label="打开餐厅链接"><ExternalLink size={15} /></a></div></div></div></article>)}</div>}
+          {pageHeader('A TASTE OF VLADIVOSTOK', '下一顿，想吃点什么？', '先收藏让你心动的照片，再慢慢记下味道、位置与喜欢的理由。', addButton('restaurant', '收藏餐厅'))}
+          <div className="collection-summary"><span><Utensils size={16} />{restaurants.length} 家想吃</span><span><CheckCircle2 size={16} />{restaurants.filter(r => r.data.visited).length} 家已打卡</span><span>点开卡片，查看照片与完整详情</span></div>
+          {!restaurants.length ? <div className="empty-card"><Empty icon={Utensils} title="让第一家餐厅成为期待" text="先放一张喜欢的照片也可以。名称、位置与人均，之后慢慢补。" action={addButton('restaurant', '记下一家想吃的店')} /></div> : <div className="food-grid">{restaurants.map(r => <article className="food-card collection-card" key={r.id} onClick={event => openCardDetail(event, r)}>
+            <div className="food-cover"><CollectionPhoto record={r} onOpen={() => setDetailId(r.id)} /><button className={r.data.visited ? 'visited-button active' : 'visited-button'} onClick={() => void act(() => update(r, { ...r.data, visited: !r.data.visited }))}><Check size={13} />{r.data.visited ? '已打卡' : '想去吃'}</button></div>
+            <div className="food-body"><div className="card-title-row"><h2><button type="button" className="collection-title-button" onClick={() => setDetailId(r.id)}>{recordTitle(r)}</button></h2>{editActions(r)}</div>{r.data.ruName && <p className="russian-name">{r.data.ruName}</p>}{r.data.cuisine && <p className="collection-cuisine">{r.data.cuisine}</p>}
+              <div className="food-meta"><span><MapPin size={14} />{r.data.address || '地址待补充'}</span><strong>{money(r.data.price, r.data.currency)}<small> / 人</small></strong></div>{r.data.note && <p className="card-note">{r.data.note}</p>}
+              <div className="card-bottom"><button className="text-button" onClick={() => addToDay(r)}><CalendarDays size={14} />加入行程</button><div><button className="icon-button" aria-label="复制餐厅地址" onClick={() => void copyAddress(r)}><Copy size={15} /></button><a className="icon-button" href={safeUrl(r.data.url) || yandex(r)} target="_blank" rel="noreferrer" aria-label="打开餐厅链接"><ExternalLink size={15} /></a></div></div>
+            </div>
+          </article>)}</div>}
         </>}
 
         {tab === 'hotels' && <>
-          {pageHeader('A WARM PLACE TO COME BACK TO', '选一扇，面向海的窗。', '把候选放在一起，比较价格、位置和喜欢的理由。', <div className="heading-actions"><button className="button secondary" onClick={() => setShowComparison(v => !v)} disabled={!hotels.length}>{showComparison ? '卡片视图' : '并排比较'}</button>{addButton('hotel', '记录酒店')}</div>)}
+          {pageHeader('A WARM PLACE TO COME BACK TO', '选一扇，面向海的窗。', '把候选放在一起，比较照片、价格、位置和喜欢的理由。', <div className="heading-actions"><button className="button secondary" onClick={() => setShowComparison(v => !v)} disabled={!hotels.length}>{showComparison ? '卡片视图' : '并排比较'}</button>{addButton('hotel', '记录酒店')}</div>)}
           <div className="hotel-note"><Hotel size={17} /><span>价格按你们记录的币种与晚数计算，不自动换汇；实际房价与余房以预订页面为准。</span></div>
-          {!hotels.length ? <div className="empty-card"><Empty icon={Hotel} title="把心动的酒店，先收进来" text="价格、位置、环境图片、预订链接，一个地方就能比较。" action={addButton('hotel', '添加第一个候选')} /></div> : showComparison ? <div className="comparison-wrap"><table className="comparison-table"><thead><tr><th>比较项目</th>{hotels.map(r => <th key={r.id}><strong>{recordTitle(r)}</strong><button className="text-button" onClick={() => openEditor('hotel', r)}>编辑<Pencil size={13} /></button></th>)}</tr></thead><tbody>{[['每晚', (r: RecordItem) => money(r.data.price, r.data.currency)], ['入住晚数', (r: RecordItem) => hasNumber(r.data.nights) ? `${r.data.nights} 晚` : '晚数待记录'], ['预计总价', (r: RecordItem) => hotelTotal(r) === undefined ? '价格或晚数待记录' : money(hotelTotal(r), r.data.currency)], ['位置', (r: RecordItem) => r.data.address || '待补充'], ['选择状态', (r: RecordItem) => r.data.status || '备选'], ['环境与备注', (r: RecordItem) => r.data.note || '待记录']].map(([label, fn]) => <tr key={String(label)}><td>{String(label)}</td>{hotels.map(r => <td key={r.id}>{(fn as (r: RecordItem) => string)(r)}</td>)}</tr>)}<tr><td>预订链接</td>{hotels.map(r => <td key={r.id}>{safeUrl(r.data.url) ? <a className="text-link" href={r.data.url} target="_blank" rel="noreferrer">查看详情 <ExternalLink size={13} /></a> : '待添加'}</td>)}</tr></tbody></table></div> : <div className="hotel-grid">{hotels.map(r => <article className="hotel-card" key={r.id}><div className="hotel-image">{r.data.images?.length ? <AuthImage src={r.data.images[0]} alt={`${recordTitle(r)}环境照片`} /> : <><Hotel size={42} strokeWidth={1} /><span>还没有环境照片</span></>}<span className={`hotel-status ${r.data.status === '已订' ? 'booked' : ''}`}>{r.data.status || '备选'}</span>{r.data.images?.length > 1 && <span className="image-count">{r.data.images.length} 张照片</span>}</div><div className="hotel-body"><div className="card-title-row"><h2>{recordTitle(r)}</h2>{editActions(r)}</div><p className="address-line"><MapPin size={14} />{r.data.address || '地址待补充'}</p><div className="hotel-price"><strong>{money(r.data.price, r.data.currency)}<small> / 晚</small></strong><span>{hasNumber(r.data.nights) ? `${r.data.nights} 晚合计 ` : '晚数待记录 · '}{hotelTotal(r) === undefined ? '价格或晚数待记录' : money(hotelTotal(r), r.data.currency)}</span></div>{r.data.note && <p className="card-note">{r.data.note}</p>}<div className="card-bottom"><button className="text-button" onClick={() => { if (hasLocation(r)) { setTab('map'); setCategory('酒店'); setSelectedId(r.id); } else openEditor('hotel', r); }}><MapPin size={14} />查看位置</button><a className="text-link" href={safeUrl(r.data.url) || yandex(r)} target="_blank" rel="noreferrer">{safeUrl(r.data.url) ? '预订页面' : '地图搜索'}<ExternalLink size={14} /></a></div></div></article>)}</div>}
+          {!hotels.length ? <div className="empty-card"><Empty icon={Hotel} title="把心动的酒店，先收进来" text="先上传一张环境照片也可以，点开卡片就能查看完整收藏。" action={addButton('hotel', '添加第一个候选')} /></div> : showComparison ? <div className="comparison-wrap"><table className="comparison-table"><thead><tr><th>比较项目</th>{hotels.map(r => <th key={r.id}><button className="collection-title-button" onClick={() => setDetailId(r.id)}>{recordTitle(r)}</button><button className="text-button" onClick={() => openEditor('hotel', r)}>编辑<Pencil size={13} /></button></th>)}</tr></thead><tbody>
+            <tr><td>环境照片</td>{hotels.map(r => <td key={r.id}><div className="comparison-photo"><CollectionPhoto record={r} onOpen={() => setDetailId(r.id)} /></div></td>)}</tr>
+            {[['每晚', (r: RecordItem) => money(r.data.price, r.data.currency)], ['入住晚数', (r: RecordItem) => hasNumber(r.data.nights) ? `${r.data.nights} 晚` : '晚数待记录'], ['预计总价', (r: RecordItem) => hotelTotal(r) === undefined ? '价格或晚数待记录' : money(hotelTotal(r), r.data.currency)], ['位置', (r: RecordItem) => r.data.address || '待补充'], ['选择状态', (r: RecordItem) => r.data.status || '备选'], ['环境与备注', (r: RecordItem) => r.data.note || '待记录']].map(([label, fn]) => <tr key={String(label)}><td>{String(label)}</td>{hotels.map(r => <td key={r.id}>{(fn as (r: RecordItem) => string)(r)}</td>)}</tr>)}<tr><td>预订链接</td>{hotels.map(r => <td key={r.id}>{safeUrl(r.data.url) ? <a className="text-link" href={r.data.url} target="_blank" rel="noreferrer">预订页面 <ExternalLink size={13} /></a> : '待添加'}</td>)}</tr></tbody></table></div> : <div className="hotel-grid">{hotels.map(r => <article className="hotel-card collection-card" key={r.id} onClick={event => openCardDetail(event, r)}>
+            <div className="hotel-image"><CollectionPhoto record={r} onOpen={() => setDetailId(r.id)} /><span className={`hotel-status ${r.data.status === '已订' ? 'booked' : ''}`}>{r.data.status || '备选'}</span></div>
+            <div className="hotel-body"><div className="card-title-row"><h2><button type="button" className="collection-title-button" onClick={() => setDetailId(r.id)}>{recordTitle(r)}</button></h2>{editActions(r)}</div><p className="address-line"><MapPin size={14} />{r.data.address || '地址待补充'}</p><div className="hotel-price"><strong>{money(r.data.price, r.data.currency)}<small> / 晚</small></strong><span>{hasNumber(r.data.nights) ? `${r.data.nights} 晚合计 ` : '晚数待记录 · '}{hotelTotal(r) === undefined ? '价格或晚数待记录' : money(hotelTotal(r), r.data.currency)}</span></div>{r.data.note && <p className="card-note">{r.data.note}</p>}<div className="card-bottom"><button className="text-button" onClick={() => { if (hasLocation(r)) { setTab('map'); setCategory('酒店'); setSelectedId(r.id); } else openEditor('hotel', r); }}><MapPin size={14} />查看位置</button><a className="text-link" href={safeUrl(r.data.url) || yandex(r)} target="_blank" rel="noreferrer">{safeUrl(r.data.url) ? '预订页面' : '地图搜索'}<ExternalLink size={14} /></a></div></div>
+          </article>)}</div>}
         </>}
 
         {tab === 'gifts' && <>
-          {pageHeader('BRING A LITTLE JOY HOME', '把旅途的喜欢，带回家。', '给自己，也给惦记的人。记好想买什么、买给谁，慢慢挑。', addButton('gift', '添加伴手礼'))}
+          {pageHeader('BRING A LITTLE JOY HOME', '把旅途的喜欢，带回家。', '给自己，也给惦记的人。先收藏一张图，再慢慢挑选。', addButton('gift', '添加伴手礼'))}
           <div className="summary-banner gifts-banner"><span className="summary-icon"><ShoppingBag size={25} /></span><div><strong>{gifts.filter(r => r.data.done).length} / {gifts.length} 件已买到</strong><p>清单里的每一件，都装着一点心意。</p></div><div className="gift-totals">{['RUB', 'CNY'].map(c => { const items = gifts.filter(r => r.data.currency === c && hasNumber(r.data.price) && hasNumber(r.data.quantity)); return items.length > 0 ? <span key={c}>{money(items.reduce((a, r) => a + Number(r.data.price) * Number(r.data.quantity), 0), c)}<small> 已填价格与数量的预算</small></span> : null; })}</div></div>
-          {!gifts.length ? <div className="empty-card"><Empty icon={Gift} title="从一份小小的心意开始" text="记录名称、数量、预算和购买人，到了当地就不用临时回想。" action={addButton('gift', '写下想带回去的东西')} /></div> : <div className="gift-grid">{gifts.map(r => <article key={r.id} className={`gift-card ${r.data.done ? 'done' : ''}`}><div className="gift-card-top"><span className="gift-symbol"><Gift size={24} strokeWidth={1.5} /></span>{editActions(r)}</div><h2>{recordTitle(r)}</h2><div className="gift-meta"><span>{hasNumber(r.data.quantity) ? `× ${r.data.quantity}` : '数量待记录'}</span><span>{r.data.buyer || '一起'} 负责</span><span>{money(r.data.price, r.data.currency)} / 件</span></div>{r.data.note && <p>{r.data.note}</p>}<button className={`gift-check ${r.data.done ? 'active' : ''}`} onClick={() => void act(() => update(r, { ...r.data, done: !r.data.done }))}>{r.data.done ? <CheckCircle2 size={17} /> : <Circle size={17} />}{r.data.done ? '已经买到啦' : '还在愿望清单里'}</button></article>)}</div>}
+          {!gifts.length ? <div className="empty-card"><Empty icon={Gift} title="从一份小小的心意开始" text="照片、备注、预算，想先记哪一项都可以。" action={addButton('gift', '写下想带回去的东西')} /></div> : <div className="gift-grid">{gifts.map(r => <article key={r.id} className={`gift-card collection-card ${r.data.done ? 'done' : ''}`} onClick={event => openCardDetail(event, r)}>
+            <div className="gift-cover"><CollectionPhoto record={r} onOpen={() => setDetailId(r.id)} /></div>
+            <div className="gift-body"><div className="card-title-row"><h2><button type="button" className="collection-title-button" onClick={() => setDetailId(r.id)}>{recordTitle(r)}</button></h2>{editActions(r)}</div><div className="gift-meta"><span>{hasNumber(r.data.quantity) ? `× ${r.data.quantity}` : '数量待记录'}</span><span>{r.data.buyer || '一起'} 负责</span><span>{money(r.data.price, r.data.currency)} / 件</span></div>{r.data.note && <p className="card-note">{r.data.note}</p>}<button className={`gift-check ${r.data.done ? 'active' : ''}`} onClick={() => void act(() => update(r, { ...r.data, done: !r.data.done }))}>{r.data.done ? <CheckCircle2 size={17} /> : <Circle size={17} />}{r.data.done ? '已经买到啦' : '还在愿望清单里'}</button></div>
+          </article>)}</div>}
         </>}
         <footer className="page-footer"><span>崔天琴 & 张渝琳 · 我们的冬日旅行手册</span><span>VLADIVOSTOK, WITH YOU.</span></footer>
       </main>
     </div>
 
+    {detailRecord && <Modal key={detailRecord.id} title={recordTitle(detailRecord)} subtitle={detailRecord.type === 'hotel' ? '一个想住下来的地方' : detailRecord.type === 'restaurant' ? '一顿值得期待的饭' : '一点想带回家的喜欢'} className="collection-detail-modal" onClose={() => setDetailId(null)}><CollectionDetails record={detailRecord} busy={sync === 'saving'} onEdit={() => { setDetailId(null); openEditor(detailRecord.type, detailRecord); }} onCopyAddress={() => void copyAddress(detailRecord)} onShowLocation={() => { setDetailId(null); setTab('map'); setCategory(detailRecord.type === 'hotel' ? '酒店' : '美食'); setSelectedId(detailRecord.id); }} onAddToDay={() => { setDetailId(null); addToDay(detailRecord); }} onToggle={() => void act(() => update(detailRecord, { ...detailRecord.data, [detailRecord.type === 'restaurant' ? 'visited' : 'done']: !(detailRecord.type === 'restaurant' ? detailRecord.data.visited : detailRecord.data.done) }))} /></Modal>}
     {editor && <Modal title={`${editor.record ? '编辑' : '添加'}${({ place: '想去的地点', note: '共同备忘', packing: '行李物品', restaurant: '想吃的餐厅', hotel: '候选酒店', gift: '伴手礼', settings: '旅行信息' })[editor.type]}`} subtitle="所有内容都选填，先记任意一项或上传照片，其余以后再补。" onClose={closeEditor}><form className="edit-form" onSubmit={saveEditor}>
       <div className="form-grid">
         {['place', 'restaurant', 'hotel', 'gift'].includes(editor.type) && <Field label="名称（选填）" wide><input maxLength={200} value={editor.data.name || ''} onChange={e => setData('name', e.target.value)} placeholder={editor.type === 'hotel' ? '酒店名称' : '给这份期待起个名字'} /></Field>}
@@ -359,8 +396,8 @@ export default function TripApp() {
         {['restaurant', 'hotel'].includes(editor.type) && <Field label="详细地址" wide><input maxLength={500} value={editor.data.address || ''} onChange={e => setData('address', e.target.value)} placeholder="可以粘贴俄文地址" /></Field>}
         {['place', 'restaurant', 'hotel'].includes(editor.type) && <div className="location-form field-wide"><label>在地图上定位（选填）</label><div className="location-search"><input aria-label="查找地点坐标" value={locationQuery} onChange={e => setLocationQuery(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void findPlaces(undefined, true); } }} placeholder="输入地点名，搜索后选择" /><button type="button" className="button secondary" disabled={locationLoading || !locationQuery.trim()} onClick={() => void findPlaces(undefined, true)}>{locationLoading ? <Loader2 size={15} className="spin" /> : <Search size={15} />}搜索</button></div>{locationResults && <div className="location-results">{locationResults.map((p, i) => <button type="button" key={`${p.id}-${i}`} onClick={() => { setEditor(e => e ? { ...e, data: { ...e.data, name: e.data.name || p.name, lat: p.lat, lng: p.lng, ...(['hotel', 'restaurant'].includes(e.type) ? { address: e.data.address || p.subtitle || '' } : {}) } } : e); setLocationResults(null); setLocationQuery(p.name); }}><MapPin size={14} /><span><b>{p.name}</b><small>{p.subtitle}</small></span></button>)}</div>}<div className="coordinate-fields"><Field label="纬度 Latitude"><input type="number" step="any" min={-90} max={90} value={editor.data.lat ?? ''} onChange={e => setData('lat', e.target.value)} placeholder="43.11…" /></Field><Field label="经度 Longitude"><input type="number" step="any" min={-180} max={180} value={editor.data.lng ?? ''} onChange={e => setData('lng', e.target.value)} placeholder="131.89…" /></Field></div><p className="tiny-text">搜索未找到时，可填入坐标，或关闭窗口后在主页选择「手动标记」。</p></div>}
         {['restaurant', 'hotel', 'gift'].includes(editor.type) && <><Field label={editor.type === 'hotel' ? '每晚价格' : editor.type === 'restaurant' ? '预计人均' : '单件预算'}><div className="price-input"><select aria-label="币种" value={editor.data.currency || 'RUB'} onChange={e => setData('currency', e.target.value)}><option value="RUB">₽ RUB</option><option value="CNY">¥ CNY</option></select><input type="number" min={0} step="0.01" value={editor.data.price ?? ''} onChange={e => setData('price', e.target.value)} placeholder="待记录" /></div></Field>{editor.type === 'hotel' && <><Field label="入住晚数"><input type="number" min={1} max={30} value={editor.data.nights ?? ''} onChange={e => setData('nights', e.target.value)} /></Field><Field label="选择状态"><select value={editor.data.status || '备选'} onChange={e => setData('status', e.target.value)}>{['收藏', '备选', '已订'].map(v => <option key={v}>{v}</option>)}</select></Field></>}{editor.type === 'gift' && <><Field label="数量"><input type="number" min={1} max={999} value={editor.data.quantity ?? ''} onChange={e => setData('quantity', e.target.value)} /></Field><Field label="谁负责购买"><select value={editor.data.buyer || '一起'} onChange={e => setData('buyer', e.target.value)}>{['一起', ...PEOPLE].map(p => <option key={p} value={p}>{PROFILES[p] ? `${PROFILES[p].nickname} · ${p}` : p}</option>)}</select></Field></>}</>}
-        {['hotel', 'restaurant'].includes(editor.type) && <Field label="收藏 / 预订链接" wide><input type="url" value={editor.data.url || ''} onChange={e => setData('url', e.target.value)} placeholder="https://…" /></Field>}
-        {editor.type === 'hotel' && <div className="field field-wide"><span>环境照片</span><div className="upload-gallery">{(editor.data.images || []).map((src: string, i: number) => <div key={src} className="upload-thumb"><AuthImage src={src} alt={`酒店环境照片 ${i + 1}`} /><button type="button" aria-label={`移除照片 ${i + 1}`} onClick={() => setData('images', editor.data.images.filter((_: string, index: number) => index !== i))}><X size={13} /></button></div>)}{(editor.data.images || []).length < 8 && <label className="upload-button">{uploading ? <Loader2 size={21} className="spin" /> : <Upload size={21} />}<span>{uploading ? '上传中…' : '添加照片'}</span><input type="file" accept="image/jpeg,image/png,image/webp,image/gif" disabled={uploading} onChange={e => void upload(e.target.files?.[0])} /></label>}</div><p className="tiny-text">JPG、PNG、WebP 或 GIF，每张不超过 4 MB，最多 8 张。</p></div>}
+        {['hotel', 'restaurant', 'gift'].includes(editor.type) && <Field label="收藏 / 预订链接" wide><input type="url" value={editor.data.url || ''} onChange={e => setData('url', e.target.value)} placeholder="https://…" /></Field>}
+        {['hotel', 'restaurant', 'gift'].includes(editor.type) && <CollectionImageEditor images={collectionImages(editor.data)} busy={saving || uploading} uploading={uploading} onChange={images => setData('images', images)} onUpload={files => void upload(files)} />}
         {['place', 'restaurant', 'hotel', 'gift'].includes(editor.type) && <Field label={editor.type === 'hotel' ? '环境、优缺点与比较备注' : editor.type === 'gift' ? '买给谁 / 去哪里买 / 备注' : '备注'} wide><textarea rows={3} maxLength={4000} value={editor.data.note || ''} onChange={e => setData('note', e.target.value)} placeholder="记下喜欢的理由，或需要注意的小事…" /></Field>}
         {editor.type === 'settings' && <><Field label="去程时间"><input value={editor.data.outbound || ''} onChange={e => setData('outbound', e.target.value)} /></Field><Field label="返程时间"><input value={editor.data.inbound || ''} onChange={e => setData('inbound', e.target.value)} /></Field></>}
       </div>

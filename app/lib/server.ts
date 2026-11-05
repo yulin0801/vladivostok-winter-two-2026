@@ -114,6 +114,10 @@ export function validateData(value: unknown, type?: string): asserts value is Re
   for (const key of ["images", "photos"]) {
     if (data[key] != null && (!Array.isArray(data[key]) || (data[key] as unknown[]).some(item => typeof item !== "string"))) throw new ApiError(400, "图片列表格式不正确。");
   }
+  if (["restaurant", "hotel", "gift"].includes(type ?? "") &&
+      (Array.isArray(data.images) ? data.images.length : 0) + (Array.isArray(data.photos) ? data.photos.length : 0) > 8) {
+    throw new ApiError(400, "每条记录最多保存 8 张照片。");
+  }
   for (const key of ["done", "visited"]) {
     if (filled(data[key]) && typeof data[key] !== "boolean") throw new ApiError(400, "完成状态格式不正确。");
   }

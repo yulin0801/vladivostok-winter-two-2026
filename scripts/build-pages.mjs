@@ -109,11 +109,11 @@ async function prepare({ basePath, apiOrigin }) {
   // This allowlist intentionally excludes app/api, all server libraries, env files,
   // hosting bindings, database migrations, and the original Next build directory.
   for (const filename of [
-    'app/layout.tsx', 'app/TripApp.tsx', 'app/travel.css', 'app/responsive.css', 'app/globals.css',
-    'app/components/AccessGate.tsx', 'app/components/TripMap.tsx', 'app/components/record-draft.ts',
+    'app/layout.tsx', 'app/TripApp.tsx', 'app/travel.css', 'app/responsive.css', 'app/gallery.css', 'app/globals.css',
     'app/lib/client-access.ts', 'app/lib/types.ts', 'lib/utils.ts', 'postcss.config.mjs',
     'vendor/shadcn-tailwind-4.13.0.css', 'vendor/shadcn-tailwind-4.13.0.LICENSE.md',
   ]) await copySourceFile(filename);
+  await copySourceTree('app/components', new Set(['.ts', '.tsx', '.css']));
   await copySourceTree('components/ui', new Set(['.ts', '.tsx', '.css']));
   await copySourceTree('hooks', new Set(['.ts', '.tsx']));
   await copySourceTree('public', new Set(['.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.ico', '.woff', '.woff2', '.ttf', '.otf', '.mp4', '.webm', '.mp3', '.wav', '.webmanifest']));

@@ -1,3 +1,3 @@
 :HL["/vladivostok-winter-two-2026/_next/static/css/f545dee7a1a3b206.css","style"]
-:HL["/vladivostok-winter-two-2026/_next/static/css/c7d6bcb5280371fd.css","style"]
-0:{"tree":{"name":"","param":null,"prefetchHints":4176,"slots":{"children":{"name":"_not-found","param":null,"prefetchHints":4192,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":4256,"slots":null}}}}},"staleTime":300,"buildId":"XGXB-5lDR5ukDdpiW7KdM"}
+:HL["/vladivostok-winter-two-2026/_next/static/css/2ce726b42fc9185f.css","style"]
+0:{"tree":{"name":"","param":null,"prefetchHints":4176,"slots":{"children":{"name":"_not-found","param":null,"prefetchHints":4192,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":4256,"slots":null}}}}},"staleTime":300,"buildId":"lj_IzYcX5QWUP_2b71gKV"}

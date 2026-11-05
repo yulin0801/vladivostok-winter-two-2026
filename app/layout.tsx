@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./travel.css";
 import "./responsive.css";
+import "./gallery.css";
 
 export const metadata: Metadata = {
   title: "去海的另一边 · 海参崴旅行手册",
