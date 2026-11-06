@@ -14,7 +14,7 @@ const reject = (type, data, label) => {
   assertions++;
 };
 
-for (const type of ['place', 'note', 'packing', 'restaurant', 'hotel', 'gift', 'settings']) {
+for (const type of ['place', 'note', 'packing', 'restaurant', 'hotel', 'gift', 'settings', 'transition']) {
   accept(type, { note: '先记下一点，其他稍后补充' }, `${type}: description-only record`);
   reject(type, {}, `${type}: empty object`);
   reject(type, { name: '   ', text: '', images: [], order: Date.now(), done: false }, `${type}: whitespace and internal defaults only`);
@@ -44,6 +44,27 @@ for (const type of ['restaurant', 'hotel', 'gift']) {
   reject(type, { images: ['javascript:alert(1)'] }, `${type}: unsafe image-only content rejected`);
   reject(type, { images: [{}] }, `${type}: image list contains only URLs`);
 }
+
+const videoUrl = 'https://offlinestore.public.blob.vercel-storage.com/videos/8bfe4c50-8254-4cc1-a1db-123456789abc.mp4';
+accept('transition', { videoUrl }, 'Uploaded video alone is meaningful');
+accept('transition', { referenceUrl: 'https://example.com/reference' }, 'Reference link alone is meaningful');
+accept('transition', { openingDone: true }, 'An explicitly completed filming step is meaningful');
+accept('transition', { ending: '转身看向大海', openingDone: false, endingDone: true }, 'Independent filming progress flags');
+for (const key of ['name', 'opening', 'ending', 'location', 'owner', 'props', 'note']) {
+  accept('transition', { [key]: '稍后补充其他内容' }, `Transition ${key} can be the only filled field`);
+  reject('transition', { [key]: {} }, `Transition ${key} must be text`);
+}
+accept('transition', { day: '2026-12-08' }, 'Transition date can be the only filled field');
+reject('transition', { videoUrl: 'https://example.com/video.mp4' }, 'Playback URL must be an uploaded Blob video');
+reject('transition', { videoUrl: videoUrl.replace('.com/', '.com.evil.example/') }, 'Deceptive Blob hostname');
+reject('transition', { videoUrl: videoUrl.replace('/videos/', '/images/') }, 'Non-video storage path');
+reject('transition', { videoUrl: `${videoUrl}?alternate=1` }, 'Unexpected URL suffix');
+reject('transition', { videoUrl: 'javascript:alert(1)' }, 'Unsafe video scheme');
+reject('transition', { referenceUrl: 'javascript:alert(1)' }, 'Unsafe reference scheme');
+reject('transition', { referenceUrl: photo }, 'Reference link must be an external HTTP(S) URL');
+reject('transition', { openingDone: 'true' }, 'Opening status must be boolean');
+reject('transition', { endingDone: 1 }, 'Ending status must be boolean');
+reject('transition', { openingDone: false, endingDone: false }, 'Untouched progress alone is empty');
 
 reject('hotel', { price: -1 }, 'Negative price');
 reject('hotel', { price: '4200' }, 'Numeric string is not silently coerced');

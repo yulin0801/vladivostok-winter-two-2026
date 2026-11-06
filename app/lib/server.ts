@@ -1,11 +1,12 @@
 import { getTripDatabase } from "./database";
 import { tripImageStore } from "./blob-store";
 import { isAllowedFrontendOrigin } from "./origin";
+import { validUploadedVideoUrl } from "./video";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
-export const recordTypes = new Set(["place", "note", "packing", "restaurant", "hotel", "gift", "settings"]);
+export const recordTypes = new Set(["place", "note", "packing", "restaurant", "hotel", "gift", "settings", "transition"]);
 export type StoredRow = { id: string; type: string; payload: string; version: number; updated_by: string; updated_at: string; deleted: number };
 export function database() {
   const url = process.env.TURSO_DATABASE_URL;
@@ -107,8 +108,8 @@ export function validateData(value: unknown, type?: string): asserts value is Re
   // Titles, text, prices, coordinates and photos are independently optional.
   // The editor filters untouched form defaults; an internal sort order alone
   // must never turn a completely empty API record into meaningful content.
-  if (!Object.entries(data).some(([key, item]) => key !== "order" && meaningful(item))) throw new ApiError(400, "填任意一项或上传照片即可保存。");
-  for (const key of ["name", "title", "text", "ruName", "address", "cuisine", "note", "category", "owner", "buyer", "currency", "status", "day", "time", "startDate", "endDate", "outbound", "inbound", "timezone", "flightNote", "url", "link", "website", "sourceUrl", "bookingUrl", "imageUrl", "coverUrl", "photoUrl"]) {
+  if (!Object.entries(data).some(([key, item]) => key !== "order" && meaningful(item))) throw new ApiError(400, type === "transition" ? "填任意一项或上传视频即可保存。" : "填任意一项或上传照片即可保存。");
+  for (const key of ["name", "title", "text", "ruName", "address", "cuisine", "note", "category", "owner", "buyer", "currency", "status", "day", "time", "startDate", "endDate", "outbound", "inbound", "timezone", "flightNote", "url", "link", "website", "sourceUrl", "bookingUrl", "imageUrl", "coverUrl", "photoUrl", "videoUrl", "referenceUrl", "opening", "ending", "location", "props"]) {
     if (filled(data[key]) && typeof data[key] !== "string") throw new ApiError(400, "文字与链接字段请填写文本内容。");
   }
   for (const key of ["images", "photos"]) {
@@ -118,7 +119,7 @@ export function validateData(value: unknown, type?: string): asserts value is Re
       (Array.isArray(data.images) ? data.images.length : 0) + (Array.isArray(data.photos) ? data.photos.length : 0) > 8) {
     throw new ApiError(400, "每条记录最多保存 8 张照片。");
   }
-  for (const key of ["done", "visited"]) {
+  for (const key of ["done", "visited", "openingDone", "endingDone"]) {
     if (filled(data[key]) && typeof data[key] !== "boolean") throw new ApiError(400, "完成状态格式不正确。");
   }
   for (const key of ["price", "budget", "quantity", "duration", "nights", "order"]) {
@@ -135,7 +136,7 @@ export function validateData(value: unknown, type?: string): asserts value is Re
     if (depth > 5) throw new ApiError(400, "记录结构过于复杂。");
     if (typeof item === "string") {
       if (item.length > 10000 || (/^(name|title)$/.test(key) && item.length > 200)) throw new ApiError(400, "文字太长，请缩短后保存。");
-      if (item.trim() && /^(url|link|website|sourceUrl|bookingUrl|imageUrl|coverUrl|photoUrl|image|photos|images)$/i.test(key) && !validUrl(item)) throw new ApiError(400, "链接需要以 http:// 或 https:// 开头。");
+      if (item.trim() && /^(url|link|website|sourceUrl|bookingUrl|imageUrl|coverUrl|photoUrl|videoUrl|referenceUrl|image|photos|images)$/i.test(key) && !validUrl(item)) throw new ApiError(400, "链接需要以 http:// 或 https:// 开头。");
     } else if (typeof item === "number" && !Number.isFinite(item)) throw new ApiError(400, "数值格式不正确。");
     else if (Array.isArray(item)) {
       if (item.length > 100) throw new ApiError(400, "单条记录包含的项目太多。");
@@ -149,6 +150,12 @@ export function validateData(value: unknown, type?: string): asserts value is Re
     }
   };
   visit(data);
+  if (type === "transition" && filled(data.videoUrl) && !validUploadedVideoUrl(data.videoUrl as string)) throw new ApiError(400, "请选择上传完成的 MP4、MOV 或 WebM 视频。");
+  if (filled(data.referenceUrl)) {
+    try {
+      if (!["http:", "https:"].includes(new URL(data.referenceUrl as string).protocol)) throw new Error("Invalid reference URL");
+    } catch { throw new ApiError(400, "参考链接需要以 http:// 或 https:// 开头。"); }
+  }
   // A partial coordinate is stored as supplied, never completed or converted
   // to zero. Only the map/routing code requires both coordinates to be present.
   if (filled(data.lat) && (typeof data.lat !== "number" || !Number.isFinite(data.lat) || data.lat < 42.4 || data.lat > 44.6)) throw new ApiError(400, "请填写海参崴及周边地区的有效纬度。");

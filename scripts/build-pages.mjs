@@ -109,7 +109,7 @@ async function prepare({ basePath, apiOrigin }) {
   // This allowlist intentionally excludes app/api, all server libraries, env files,
   // hosting bindings, database migrations, and the original Next build directory.
   for (const filename of [
-    'app/layout.tsx', 'app/TripApp.tsx', 'app/travel.css', 'app/responsive.css', 'app/gallery.css', 'app/globals.css',
+    'app/layout.tsx', 'app/TripApp.tsx', 'app/travel.css', 'app/responsive.css', 'app/gallery.css', 'app/transitions.css', 'app/globals.css',
     'app/lib/client-access.ts', 'app/lib/types.ts', 'lib/utils.ts', 'postcss.config.mjs',
     'vendor/shadcn-tailwind-4.13.0.css', 'vendor/shadcn-tailwind-4.13.0.LICENSE.md',
   ]) await copySourceFile(filename);
@@ -119,7 +119,9 @@ async function prepare({ basePath, apiOrigin }) {
   await copySourceTree('public', new Set(['.svg', '.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.ico', '.woff', '.woff2', '.ttf', '.otf', '.mp4', '.webm', '.mp3', '.wav', '.webmanifest']));
 
   const sourcePackage = JSON.parse(await readFile(path.join(sourceRoot, 'package.json'), 'utf8'));
-  const serverPackages = new Set(['@libsql/client', '@vercel/blob', 'drizzle-orm', 'drizzle-kit']);
+  // Blob's browser client is required for direct video uploads. Server code and
+  // credentials remain excluded from this static frontend.
+  const serverPackages = new Set(['@libsql/client', 'drizzle-orm', 'drizzle-kit']);
   const dependencies = Object.fromEntries(Object.entries(sourcePackage.dependencies || {}).filter(([name]) => !serverPackages.has(name)));
   const devDependencies = Object.fromEntries(Object.entries(sourcePackage.devDependencies || {}).filter(([name]) => !serverPackages.has(name)));
   await writeFile(path.join(stageRoot, 'package.json'), JSON.stringify({

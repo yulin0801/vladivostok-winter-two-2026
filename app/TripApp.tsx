@@ -2,15 +2,16 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { FormEvent, MouseEvent, ReactNode } from 'react';
-import { ArrowDown, ArrowRight, ArrowUp, Bookmark, CalendarDays, Check, CheckCircle2, ChevronRight, Circle, Cloud, CloudOff, Compass, Copy, Download, ExternalLink, Gift, Heart, Hotel, ListChecks, Loader2, MapPin, Map as MapIcon, MoreHorizontal, Navigation, NotebookPen, Pencil, Plane, Plus, Search, ShoppingBag, Snowflake, Sparkles, Luggage as Suitcase, Trash2, Users, Utensils, Waves, X } from 'lucide-react';
+import { ArrowDown, ArrowRight, ArrowUp, Bookmark, CalendarDays, Check, CheckCircle2, ChevronRight, Circle, Clapperboard, Cloud, CloudOff, Compass, Copy, Download, ExternalLink, Gift, Heart, Hotel, ListChecks, Loader2, MapPin, Map as MapIcon, MoreHorizontal, Navigation, NotebookPen, Pencil, Plane, Plus, Search, ShoppingBag, Snowflake, Sparkles, Luggage as Suitcase, Trash2, Users, Utensils, Waves, X } from 'lucide-react';
 import TripMap from './components/TripMap';
 import type { PlacePoint, RecordItem, RecordType } from './lib/types';
 import { apiFetch, getShareUrl, publicAssetUrl } from './lib/client-access';
 import { hasDraftContent, hasLocation, hasNumber, hotelTotal, rebaseDraft, recordTitle } from './components/record-draft';
 import { CollectionImageEditor, CollectionPhoto, collectionImages } from './components/CollectionPhotos';
 import CollectionDetails from './components/CollectionDetails';
+import { TransitionDetails, TransitionEditorFields, TransitionPage } from './components/TransitionPlanner';
 
-type Tab = 'map' | 'days' | 'notes' | 'packing' | 'food' | 'hotels' | 'gifts';
+type Tab = 'map' | 'days' | 'transitions' | 'notes' | 'packing' | 'food' | 'hotels' | 'gifts';
 type SearchPlace = PlacePoint & { subtitle?: string };
 type Editor = { type: RecordType; record?: RecordItem; data: any; baseline: Record<string, unknown> };
 type RoadRoute = { geometry: { type: 'LineString'; coordinates: number[][] }; distance: number; duration: number; order: string[]; signature: string; mode: 'walking' | 'driving' };
@@ -24,6 +25,7 @@ const PROFILES: Record<string, { nickname: string; photo: string }> = {
 const NAV: { id: Tab; title: string; subtitle: string; icon: typeof MapIcon }[] = [
   { id: 'map', title: '地图探索', subtitle: '把向往的地方，放进地图', icon: MapIcon },
   { id: 'days', title: '每日行程', subtitle: '留一点计划，也留一点随性', icon: CalendarDays },
+  { id: 'transitions', title: '转场拍摄', subtitle: '把这趟旅行，拍成我们的电影', icon: Clapperboard },
   { id: 'notes', title: '共同备忘', subtitle: '出发前的小事，一起记好', icon: NotebookPen },
   { id: 'packing', title: '双人行李', subtitle: '一个目的地，两只行李箱', icon: Suitcase },
   { id: 'food', title: '想吃的美食', subtitle: '用一顿好饭，认识一座城', icon: Utensils },
@@ -36,6 +38,7 @@ const pointOf = (r: RecordItem, index?: number): PlacePoint => ({ id: r.id, name
 const safeUrl = (url: string) => /^https?:\/\//i.test(url || '') ? url : '';
 const yandex = (r: RecordItem) => `https://yandex.com/maps/?${hasLocation(r) ? `ll=${r.data.lng}%2C${r.data.lat}&z=16&pt=${r.data.lng}%2C${r.data.lat}%2Cpm2rdm` : `text=${encodeURIComponent(`${r.data.ruName || r.data.name || r.data.address || ''} Владивосток`)}`}`;
 const signature = (list: RecordItem[]) => list.map(r => `${r.id}:${r.data.lat},${r.data.lng}`).join('|');
+const pauseMainVideos = () => document.querySelectorAll<HTMLVideoElement>('main video').forEach(video => video.pause());
 
 async function request(url: string, options?: RequestInit): Promise<any> {
   const response = await apiFetch(url, { cache: 'no-store', ...options });
@@ -56,6 +59,7 @@ function defaults(type: RecordType, overrides: any = {}) {
     restaurant: { name: '', ruName: '', address: '', lat: '', lng: '', cuisine: '', price: '', currency: 'RUB', images: [], note: '', url: '', visited: false },
     hotel: { name: '', address: '', lat: '', lng: '', price: '', currency: 'RUB', nights: '', images: [], url: '', note: '', status: '备选' },
     gift: { name: '', quantity: '', price: '', currency: 'RUB', buyer: '一起', images: [], url: '', note: '', done: false },
+    transition: { name: '', videoUrl: '', referenceUrl: '', opening: '', ending: '', location: '', day: '', owner: '', props: '', note: '', openingDone: false, endingDone: false },
     settings: { startDate: DAYS[0], endDate: DAYS[4], outbound: '', inbound: '' },
   };
   return { ...data[type], ...overrides };
@@ -98,6 +102,7 @@ export default function TripApp() {
   const [toast, setToast] = useState('');
   const [editor, setEditor] = useState<Editor | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [transitionDetailId, setTransitionDetailId] = useState<string | null>(null);
   const [formError, setFormError] = useState('');
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<RecordItem | null>(null);
@@ -159,6 +164,7 @@ export default function TripApp() {
   const packing = useMemo(() => records.filter(r => r.type === 'packing'), [records]);
   const unassignedPacking = packing.filter(r => !PEOPLE.includes(r.data.owner));
   const gifts = useMemo(() => records.filter(r => r.type === 'gift'), [records]);
+  const transitions = useMemo(() => records.filter(r => r.type === 'transition'), [records]);
   const dayPlaces = useMemo(() => places.filter(r => r.data.day === day).sort((a, b) => Number(a.data.order || 0) - Number(b.data.order || 0) || a.id.localeCompare(b.id)), [places, day]);
   const locatedDayPlaces = dayPlaces.filter(hasLocation);
   const daySignature = signature(locatedDayPlaces);
@@ -170,6 +176,7 @@ export default function TripApp() {
   const activeNav = NAV.find(n => n.id === tab)!;
   const settings = records.find(r => r.type === 'settings');
   const detailRecord = detailId ? records.find(r => r.id === detailId) : undefined;
+  const transitionDetail = transitionDetailId ? transitions.find(r => r.id === transitionDetailId) : undefined;
 
   const mutate = async (operation: () => Promise<any>) => {
     mutationBusy.current = true; setSync('saving');
@@ -181,14 +188,15 @@ export default function TripApp() {
   const update = (record: RecordItem, data: any) => mutate(() => request(`/api/records/${encodeURIComponent(record.id)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data, version: record.version }) }));
   const act = async (fn: () => Promise<any>, message?: string) => { try { await fn(); if (message) setToast(message); } catch (e: any) { setToast(e.message); } };
   const closeEditor = useCallback(() => { if (!mutationBusy.current && !uploadBusy.current) { setEditor(null); setFormError(''); } }, []);
-  const openEditor = (type: RecordType, record?: RecordItem, data?: any) => { touchedFields.current = new Set(); const initial = defaults(type, record?.data || data || {}); setEditor({ type, record, data: initial, baseline: structuredClone(initial) }); setFormError(''); setLocationQuery(''); setLocationResults(null); };
+  const openEditor = (type: RecordType, record?: RecordItem, data?: any) => { if (type === 'transition') pauseMainVideos(); touchedFields.current = new Set(); const initial = defaults(type, record?.data || data || {}); setEditor({ type, record, data: initial, baseline: structuredClone(initial) }); setFormError(''); setLocationQuery(''); setLocationResults(null); };
   const setData = (key: string, value: any) => { touchedFields.current.add(key); setEditor(e => e ? { ...e, data: { ...e.data, [key]: value } } : e); };
 
   async function saveEditor(event: FormEvent) {
     event.preventDefault(); if (!editor || saving || uploading) return;
     const data: Record<string, any> = Object.fromEntries(Object.entries(editor.data).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value]));
-    if (!hasDraftContent(data, touchedFields.current, !!editor.record)) { setFormError('先填任意一项，或上传一张照片，就可以保存；其他内容可以以后补。'); return; }
+    if (!hasDraftContent(data, touchedFields.current, !!editor.record)) { setFormError(editor.type === 'transition' ? '先填任意一项、粘贴参考链接或上传一个视频，就可以保存；其他内容可以以后补。' : '先填任意一项，或上传一张照片，就可以保存；其他内容可以以后补。'); return; }
     if (data.url && !safeUrl(data.url)) { setFormError('链接需要以 https:// 或 http:// 开头。'); return; }
+    if (editor.type === 'transition' && [data.videoUrl, data.referenceUrl].some(value => value && !safeUrl(value))) { setFormError('视频和参考链接需要以 https:// 或 http:// 开头。'); return; }
     for (const key of ['lat', 'lng', 'price', 'quantity', 'nights', 'duration', 'order']) {
       if (data[key] === '' || data[key] === undefined || data[key] === null) { delete data[key]; continue; }
       data[key] = Number(data[key]);
@@ -335,6 +343,8 @@ export default function TripApp() {
           {places.some(r => !r.data.day) && <section className="unplanned"><div className="section-top"><h3>还没安排的收藏</h3><span>{places.filter(r => !r.data.day).length} 个</span></div><div className="unplanned-list">{places.filter(r => !r.data.day).map(r => <button key={r.id} onClick={() => addToDay(r)}><MapPin size={14} />{recordTitle(r)}<Plus size={14} /></button>)}</div></section>}
         </>}
 
+        {tab === 'transitions' && <TransitionPage records={transitions} busy={sync === 'saving'} onAdd={() => openEditor('transition')} onEdit={record => openEditor('transition', record)} onDelete={setDeleteTarget} onOpen={record => { pauseMainVideos(); setTransitionDetailId(record.id); }} onToggle={(record, field) => void act(() => update(record, { ...record.data, [field]: !record.data[field] }))} />}
+
         {tab === 'notes' && <>
           {pageHeader('LITTLE THINGS, ALL REMEMBERED', '小事记在这里，安心去旅行。', '证件、通信、换汇、预约……一起把出发前的事情准备好。', addButton('note', '添加备忘'))}
           <div className="summary-banner"><span className="summary-icon"><ListChecks size={25} /></span><div><strong>{notes.filter(r => r.data.done).length} / {notes.length} 项已完成</strong><p>每准备好一件小事，就离出发更近一点。</p></div><div className="progress-track"><span style={{ width: `${notes.length ? notes.filter(r => r.data.done).length / notes.length * 100 : 0}%` }} /></div></div>
@@ -384,8 +394,10 @@ export default function TripApp() {
     </div>
 
     {detailRecord && <Modal key={detailRecord.id} title={recordTitle(detailRecord)} subtitle={detailRecord.type === 'hotel' ? '一个想住下来的地方' : detailRecord.type === 'restaurant' ? '一顿值得期待的饭' : '一点想带回家的喜欢'} className="collection-detail-modal" onClose={() => setDetailId(null)}><CollectionDetails record={detailRecord} busy={sync === 'saving'} onEdit={() => { setDetailId(null); openEditor(detailRecord.type, detailRecord); }} onCopyAddress={() => void copyAddress(detailRecord)} onShowLocation={() => { setDetailId(null); setTab('map'); setCategory(detailRecord.type === 'hotel' ? '酒店' : '美食'); setSelectedId(detailRecord.id); }} onAddToDay={() => { setDetailId(null); addToDay(detailRecord); }} onToggle={() => void act(() => update(detailRecord, { ...detailRecord.data, [detailRecord.type === 'restaurant' ? 'visited' : 'done']: !(detailRecord.type === 'restaurant' ? detailRecord.data.visited : detailRecord.data.done) }))} /></Modal>}
-    {editor && <Modal title={`${editor.record ? '编辑' : '添加'}${({ place: '想去的地点', note: '共同备忘', packing: '行李物品', restaurant: '想吃的餐厅', hotel: '候选酒店', gift: '伴手礼', settings: '旅行信息' })[editor.type]}`} subtitle="所有内容都选填，先记任意一项或上传照片，其余以后再补。" onClose={closeEditor}><form className="edit-form" onSubmit={saveEditor}>
+    {transitionDetail && <Modal key={transitionDetail.id} title={recordTitle(transitionDetail)} subtitle="开头与结尾，现场一眼就能想起来。" className="transition-detail-modal" onClose={() => setTransitionDetailId(null)}><TransitionDetails record={transitionDetail} busy={sync === 'saving'} onEdit={() => { setTransitionDetailId(null); openEditor('transition', transitionDetail); }} onToggle={field => void act(() => update(transitionDetail, { ...transitionDetail.data, [field]: !transitionDetail.data[field] }))} /></Modal>}
+    {editor && <Modal title={`${editor.record ? '编辑' : '添加'}${({ place: '想去的地点', note: '共同备忘', packing: '行李物品', restaurant: '想吃的餐厅', hotel: '候选酒店', gift: '伴手礼', transition: '转场灵感', settings: '旅行信息' })[editor.type]}`} subtitle={editor.type === 'transition' ? '所有内容都选填，视频、链接或一句拍法都能先保存。' : '所有内容都选填，先记任意一项或上传照片，其余以后再补。'} onClose={closeEditor}><form className="edit-form" onSubmit={saveEditor}>
       <div className="form-grid">
+        {editor.type === 'transition' && <TransitionEditorFields data={editor.data} busy={saving || uploading} setData={setData} onUploading={value => { uploadBusy.current = value; setUploading(value); }} onError={setFormError} />}
         {['place', 'restaurant', 'hotel', 'gift'].includes(editor.type) && <Field label="名称（选填）" wide><input maxLength={200} value={editor.data.name || ''} onChange={e => setData('name', e.target.value)} placeholder={editor.type === 'hotel' ? '酒店名称' : '给这份期待起个名字'} /></Field>}
         {['note', 'packing'].includes(editor.type) && <Field label="内容（选填）" wide><input maxLength={500} value={editor.data.text || ''} onChange={e => setData('text', e.target.value)} placeholder={editor.type === 'packing' ? '例如：防风手套' : '例如：购买流量卡'} /></Field>}
         {['note', 'packing', 'place'].includes(editor.type) && <Field label="分类"><select value={editor.data.category || ''} onChange={e => setData('category', e.target.value)}>{(editor.type === 'place' ? ['景点', '美食', '酒店', '交通'] : editor.type === 'note' ? ['出发前', '证件', '通信', '交通', '预订', '住宿', '行程', '其他'] : ['证件', '衣物', '洗护', '电子', '药品', '日用', '共用', '其他']).map(v => <option key={v}>{v}</option>)}</select></Field>}
