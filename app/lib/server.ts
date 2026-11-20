@@ -108,7 +108,8 @@ export function validateData(value: unknown, type?: string): asserts value is Re
   // Titles, text, prices, coordinates and photos are independently optional.
   // The editor filters untouched form defaults; an internal sort order alone
   // must never turn a completely empty API record into meaningful content.
-  if (!Object.entries(data).some(([key, item]) => key !== "order" && meaningful(item))) throw new ApiError(400, type === "transition" ? "填任意一项或上传视频即可保存。" : "填任意一项或上传照片即可保存。");
+  // Transitions may start as empty placeholders and be completed later.
+  if (type !== "transition" && !Object.entries(data).some(([key, item]) => key !== "order" && meaningful(item))) throw new ApiError(400, "填任意一项或上传照片即可保存。");
   for (const key of ["name", "title", "text", "ruName", "address", "cuisine", "note", "category", "owner", "buyer", "currency", "status", "day", "time", "startDate", "endDate", "outbound", "inbound", "timezone", "flightNote", "url", "link", "website", "sourceUrl", "bookingUrl", "imageUrl", "coverUrl", "photoUrl", "videoUrl", "referenceUrl", "opening", "ending", "location", "props"]) {
     if (filled(data[key]) && typeof data[key] !== "string") throw new ApiError(400, "文字与链接字段请填写文本内容。");
   }

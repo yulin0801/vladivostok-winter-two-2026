@@ -16,8 +16,9 @@ const reject = (type, data, label) => {
 
 for (const type of ['place', 'note', 'packing', 'restaurant', 'hotel', 'gift', 'settings', 'transition']) {
   accept(type, { note: '先记下一点，其他稍后补充' }, `${type}: description-only record`);
-  reject(type, {}, `${type}: empty object`);
-  reject(type, { name: '   ', text: '', images: [], order: Date.now(), done: false }, `${type}: whitespace and internal defaults only`);
+  const checkEmpty = type === 'transition' ? accept : reject;
+  checkEmpty(type, {}, `${type}: empty object`);
+  checkEmpty(type, { name: '   ', text: '', images: [], order: Date.now(), done: false }, `${type}: whitespace and internal defaults only`);
 }
 accept('place', { name: '一个待定位的地方' }, 'Name without coordinates');
 accept('place', { lat: 43.12 }, 'Latitude without name or longitude');
@@ -64,7 +65,7 @@ reject('transition', { referenceUrl: 'javascript:alert(1)' }, 'Unsafe reference 
 reject('transition', { referenceUrl: photo }, 'Reference link must be an external HTTP(S) URL');
 reject('transition', { openingDone: 'true' }, 'Opening status must be boolean');
 reject('transition', { endingDone: 1 }, 'Ending status must be boolean');
-reject('transition', { openingDone: false, endingDone: false }, 'Untouched progress alone is empty');
+accept('transition', { openingDone: false, endingDone: false }, 'An untouched transition can be saved as a placeholder');
 
 reject('hotel', { price: -1 }, 'Negative price');
 reject('hotel', { price: '4200' }, 'Numeric string is not silently coerced');

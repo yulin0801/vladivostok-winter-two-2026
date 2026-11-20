@@ -109,7 +109,7 @@ try {
   }
   assert.equal((await db.prepare('SELECT COUNT(*) AS total FROM trip_records').first()).total, 0, 'Upload callbacks never create trip records');
 
-  for (const data of [{ videoUrl: callback.payload.blob.url }, { referenceUrl: 'https://example.test/reference' }, { opening: '用围巾遮住镜头' }]) {
+  for (const data of [{}, { openingDone: false, endingDone: false }, { videoUrl: callback.payload.blob.url }, { referenceUrl: 'https://example.test/reference' }, { opening: '用围巾遮住镜头' }]) {
     const created = await createRecord(request('/api/records', { type: 'transition', data }));
     assert.equal(created.status, 201);
     const { record } = await created.json();
@@ -126,10 +126,10 @@ try {
     assert.equal(unsafe.status, 400);
     assert.deepEqual(await db.prepare('SELECT * FROM trip_records WHERE id = ?').bind(record.id).first(), before, 'Rejected updates preserve content and version');
   }
-  assert.equal((await db.prepare('SELECT COUNT(*) AS total FROM trip_records').first()).total, 3);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS total FROM trip_records').first()).total, 5);
   delete process.env.BLOB_READ_WRITE_TOKEN;
   await rejected(event(), 503);
-  console.log(`PASS video upload: ${tokenCases} real-SDK token/callback cases, Pages CORS, 50 MiB exact-path/MIME/no-overwrite constraints, valid signed no-Origin callbacks, tampering rejected; three partial transition CRUD flows with CAS; no network or cloud writes`);
+  console.log(`PASS video upload: ${tokenCases} real-SDK token/callback cases, Pages CORS, 50 MiB exact-path/MIME/no-overwrite constraints, valid signed no-Origin callbacks, tampering rejected; five empty/partial transition CRUD flows with CAS; no network or cloud writes`);
 } finally {
   globalThis.fetch = originalFetch;
   for (const [key, value] of Object.entries(previous)) {
